@@ -1,0 +1,78 @@
+pipeline {
+    agent any
+    environment {
+        NEXUS_URL = '192.168.5.82:8083/repository/NodeApp/' // Nexus repository URL
+        NEXUS_CREDENTIALS_ID = 'nexus-credentials' // Jenkins credentials for Nexus
+        TOMCAT_URL = 'http://192.168.5.175:8080/manager/text' // Tomcat manager URL
+        TOMCAT_CREDENTIALS_ID = 'tomcat-credentials' // Jenkins credentials for Tomcat
+        GITHUB_REPO = 'https://github.com/<your-username>/<your-repository>.git' // GitHub repo URL
+        GITHUB_CREDENTIALS_ID = 'github-credentials' // Jenkins GitHub credentials
+        WAR_FILE_NAME = 'selenium-app.war' // WAR file name to be created and deployed
+    }
+    stages {
+        stage('Checkout from GitHub') {
+            steps {
+                git credentialsId: "${GITHUB_CREDENTIALS_ID}", url: "${GITHUB_REPO}"
+            }
+        }
+        stage('Build WAR using Maven') {
+            steps {
+                sh 'mvn clean package' // Builds the WAR file
+            }
+        }
+        stage('Upload WAR to Nexus') {
+            steps {
+                script {
+                    def pom = readMavenPom file: 'pom.xml'
+                    nexusArtifactUploader(
+                        nexusVersion: 'nexus3',
+                        protocol: 'http',
+                        nexusUrl: "${NEXUS_URL}",
+                        groupId: pom.groupId,
+                        version: pom.version,
+                        repository: 'NodeApp',
+                        credentialsId: "${NEXUS_CREDENTIALS_ID}",
+                        artifacts: [
+                            [artifactId: pom.artifactId,
+                             classifier: '',
+                             file: "target/${WAR_FILE_NAME}",
+                             type: 'war']
+                        ]
+                    )
+                }
+            }
+        }
+        stage('Download and Deploy WAR from Nexus to Tomcat') {
+            steps {
+                script {
+                    def pom = readMavenPom file: 'pom.xml'
+                    def artifactUrl = "${NEXUS_URL}${pom.groupId.replace('.', '/')}/${pom.artifactId}/${pom.version}/${WAR_FILE_NAME}"
+                    sh "curl -u ${NEXUS_CREDENTIALS_ID} -O ${artifactUrl}" // Download WAR from Nexus
+                }
+                deploy adapters: [tomcat9(credentialsId: "${TOMCAT_CREDENTIALS_ID}", url: "${TOMCAT_URL}")],
+                       war: "${WAR_FILE_NAME}",
+                       contextPath: "/selenium-app" // Deploy to Tomcat with the specified context path
+            }
+        }
+        stage('Selenium Testing') {
+            steps {
+                sh """
+                # Start the Selenium test after deployment
+                mvn test -Dtest=YourSeleniumTestClass
+                """
+            }
+        }
+    }
+    post {
+        always {
+            echo 'Cleaning up workspace'
+            cleanWs()
+        }
+        success {
+            echo 'Deployment and Testing Successful!'
+        }
+        failure {
+            echo 'Deployment or Testing Failed.'
+        }
+    }
+}
