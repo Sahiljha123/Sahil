@@ -1,0 +1,6 @@
+<html>
+<body>
+    <h1>Welcome</h1>
+    <p>You have successfully logged in!</p>
+</body>
+</html>
